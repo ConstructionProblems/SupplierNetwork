@@ -408,6 +408,51 @@ SAMPLE_SUPPLIERS_TIER1 = [
             {"name": "Control cabinet & protection relays", "capacity": 80.0, "lead_time": 5.0, "moq": 1.0},
         ],
     },
+    {
+        "name": "Sunrise Copper Fabricators",
+        "tier": 1,
+        "address": "Austin, TX, USA",
+        "city": "Austin",
+        "country": "USA",
+        "latitude": 30.267,
+        "longitude": -97.743,
+        "primary_contact": "Lydia Chen",
+        "email": "programs@sunrisecopper.example",
+        "phone": "+1 512 555 8842",
+        "components": [
+            {"name": "Copper windings", "capacity": 5200.0, "lead_time": 7.0, "moq": 1600.0},
+        ],
+    },
+    {
+        "name": "Great Plains Petrochem",
+        "tier": 1,
+        "address": "Regina, SK, Canada",
+        "city": "Regina",
+        "country": "Canada",
+        "latitude": 50.445,
+        "longitude": -104.618,
+        "primary_contact": "Elliot Fraser",
+        "email": "supply@greatplainspetro.example",
+        "phone": "+1 306 555 1190",
+        "components": [
+            {"name": "Insulating oil", "capacity": 21000.0, "lead_time": 6.0, "moq": 8000.0},
+        ],
+    },
+    {
+        "name": "Continental HV Systems",
+        "tier": 1,
+        "address": "Lyon, France",
+        "city": "Lyon",
+        "country": "France",
+        "latitude": 45.764,
+        "longitude": 4.835,
+        "primary_contact": "Julien Mercier",
+        "email": "sales@continentalhv.example",
+        "phone": "+33 4 555 78900",
+        "components": [
+            {"name": "Bushings HV", "capacity": 140.0, "lead_time": 12.0, "moq": 10.0},
+        ],
+    },
 ]
 
 SAMPLE_SUPPLIERS_TIER2 = [
@@ -465,6 +510,45 @@ SAMPLE_SUPPLIERS_TIER2 = [
         "latitude": 41.593,
         "longitude": -87.346,
     },
+    {
+        "name": "Altiplano Copper Refiners",
+        "tier": 2,
+        "address": "La Paz, Bolivia",
+        "city": "La Paz",
+        "country": "Bolivia",
+        "latitude": -16.489,
+        "longitude": -68.119,
+    },
+    {
+        "name": "Nordic Petrochemical Upgraders",
+        "tier": 2,
+        "address": "Bergen, Norway",
+        "city": "Bergen",
+        "country": "Norway",
+        "latitude": 60.392,
+        "longitude": 5.324,
+    },
+]
+
+SAMPLE_SUPPLIERS_TIER3 = [
+    {
+        "name": "Patagonia Copper Cooperative",
+        "tier": 3,
+        "address": "San Antonio Oeste, Argentina",
+        "city": "San Antonio Oeste",
+        "country": "Argentina",
+        "latitude": -40.732,
+        "longitude": -64.947,
+    },
+    {
+        "name": "Arctic Base Stock Extraction",
+        "tier": 3,
+        "address": "Akureyri, Iceland",
+        "city": "Akureyri",
+        "country": "Iceland",
+        "latitude": 65.688,
+        "longitude": -18.126,
+    },
 ]
 
 SAMPLE_FACILITY_COMPONENTS = [
@@ -496,6 +580,15 @@ SAMPLE_FLOWS = [
     {"from": "GreatLakes Fabrication", "to": "Maple Grid Systems – Cambridge Final Assembly", "component": "Tank & Radiator assembly", "flow_type": "component", "lead_time": 4.0, "incoterms": "DAP"},
     {"from": "Prairie Fasteners", "to": "Maple Grid Systems – Cambridge Final Assembly", "component": "Core clamping hardware", "flow_type": "component", "lead_time": 6.0, "incoterms": "CIP"},
     {"from": "NorthStar Controls", "to": "Maple Grid Systems – Cambridge Final Assembly", "component": "Control cabinet & protection relays", "flow_type": "finished", "lead_time": 5.0, "incoterms": "DAP"},
+    {"from": "Patagonia Copper Cooperative", "to": "Altiplano Copper Refiners", "component": "Copper windings", "flow_type": "raw_material", "lead_time": 18.0, "incoterms": "FCA"},
+    {"from": "Altiplano Copper Refiners", "to": "Sunrise Copper Fabricators", "component": "Copper windings", "flow_type": "semi_finished", "lead_time": 11.0, "incoterms": "DAP"},
+    {"from": "Sunrise Copper Fabricators", "to": "Maple Grid Systems – Windsor Coil Shop", "component": "Copper windings", "flow_type": "component", "lead_time": 4.0, "incoterms": "DAP"},
+    {"from": "Sunrise Copper Fabricators", "to": "Maple Grid Systems – Cambridge Final Assembly", "component": "Copper windings", "flow_type": "component", "lead_time": 6.0, "incoterms": "DAP"},
+    {"from": "Arctic Base Stock Extraction", "to": "Nordic Petrochemical Upgraders", "component": "Insulating oil", "flow_type": "raw_material", "lead_time": 16.0, "incoterms": "FOB"},
+    {"from": "Nordic Petrochemical Upgraders", "to": "Great Plains Petrochem", "component": "Insulating oil", "flow_type": "semi_finished", "lead_time": 9.0, "incoterms": "CFR"},
+    {"from": "Great Plains Petrochem", "to": "Maple Grid Systems – Cambridge Final Assembly", "component": "Insulating oil", "flow_type": "component", "lead_time": 4.0, "incoterms": "DAP"},
+    {"from": "EuroCeramics HV", "to": "Continental HV Systems", "component": "Bushings HV", "flow_type": "semi_finished", "lead_time": 15.0, "incoterms": "FCA"},
+    {"from": "Continental HV Systems", "to": "Maple Grid Systems – Cambridge Final Assembly", "component": "Bushings HV", "flow_type": "component", "lead_time": 8.0, "incoterms": "DAP"},
 ]
 
 
@@ -548,7 +641,7 @@ def ensure_sample_data(session: Session) -> None:
     session.flush()
 
     suppliers: Dict[str, Supplier] = {}
-    for entry in [*SAMPLE_SUPPLIERS_TIER1, *SAMPLE_SUPPLIERS_TIER2]:
+    for entry in [*SAMPLE_SUPPLIERS_TIER1, *SAMPLE_SUPPLIERS_TIER2, *SAMPLE_SUPPLIERS_TIER3]:
         supplier = Supplier(
             name=entry["name"],
             tier=entry["tier"],
