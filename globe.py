@@ -827,6 +827,7 @@ class FilterCriteria:
     include_subtiers: bool
     selected_product_names: List[str]
     selected_component_names: List[str]
+    include_facility_types: Set[str]
 
 
 @dataclass
@@ -878,6 +879,22 @@ def render_filters(session: Session) -> FilterCriteria:
     if not include_subtiers:
         tier_levels = {tier for tier in tier_levels if tier == 1} or {1}
 
+    facility_types = ["assembly", "sub_assembly"]
+    facility_labels = {
+        "assembly": "Assembly facilities",
+        "sub_assembly": "Sub-assembly facilities",
+    }
+    selected_facilities = st.sidebar.multiselect(
+        "Facility Types",
+        [facility_labels[key] for key in facility_types],
+        default=[facility_labels[key] for key in facility_types],
+    )
+    include_facility_types = {
+        key for key in facility_types if facility_labels[key] in selected_facilities
+    }
+    if not include_facility_types:
+        include_facility_types = {"assembly", "sub_assembly"}
+
     country_values = session.execute(select(SupplyNode.country).distinct()).scalars().all()
     countries = sorted({country for country in country_values if country})
     selected_countries = set(st.sidebar.multiselect("Country", countries))
@@ -893,6 +910,7 @@ def render_filters(session: Session) -> FilterCriteria:
         include_subtiers=include_subtiers,
         selected_product_names=list(selected_product_names),
         selected_component_names=component_names_display,
+        include_facility_types=include_facility_types,
     )
 
 
@@ -1075,6 +1093,8 @@ def collect_visual_data(
         else:
             facility = node.facility
             f_type = (facility.facility_type if facility else "assembly").lower()
+            if f_type not in filters.include_facility_types:
+                continue
             color = FACILITY_COLOR_BY_TYPE.get(f_type, [255, 193, 7, 220])
             radius = FACILITY_RADIUS
             role = f"{f_type.replace('_', ' ').title()} Facility"
@@ -1363,6 +1383,8 @@ def render_map(map_data: MapData, *, chart_placeholder=None) -> None:
         get_target_color="color",
         get_width="width",
         pickable=True,
+        auto_highlight=True,
+        highlight_color=[32, 32, 32, 240],
         tooltip={
             "html": "{tooltip_html}",
             "style": {"backgroundColor": "#1f2630", "color": "white"},
@@ -1379,6 +1401,8 @@ def render_map(map_data: MapData, *, chart_placeholder=None) -> None:
             get_line_color="line_color",
             line_width_min_pixels=1,
             pickable=True,
+            auto_highlight=True,
+            highlight_color=[24, 24, 24, 230],
             tooltip={
                 "html": "{tooltip_html}",
                 "style": {"backgroundColor": "#1f2630", "color": "white"},
