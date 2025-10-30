@@ -1966,4 +1966,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    print("Launch the interactive prototype with: streamlit run globe.py")
+    main()
