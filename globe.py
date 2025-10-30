@@ -930,20 +930,31 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                 {link.component.name for link in (facility.components if facility else []) if link.component}
             )
 
+        components_str = ", ".join(components_list) if components_list else "—"
+        lead_summary = summarize_lead_times(node, filtered_flows) or "—"
+        city_label = f"{node.city}, {node.country}" if node.city else node.country
+
         node_records.append(
             {
                 "id": node.id,
                 "name": node.name,
                 "role": role,
-                "city": f"{node.city}, {node.country}" if node.city else node.country,
+                "city": city_label,
                 "country": node.country,
                 "latitude": node.latitude,
                 "longitude": node.longitude,
                 "tier": node.tier,
-                "components": ", ".join(components_list) if components_list else "—",
-                "lead_time_summary": summarize_lead_times(node, filtered_flows) or "—",
+                "components": components_str,
+                "lead_time_summary": lead_summary,
                 "color": color,
                 "radius": radius,
+                "tooltip_html": (
+                    f"<b>{node.name}</b><br/>"
+                    f"{role}<br/>"
+                    f"{city_label}<br/>"
+                    f"<b>Components:</b> {components_str}<br/>"
+                    f"<b>Lead times:</b> {lead_summary}"
+                ),
             }
         )
 
@@ -960,6 +971,13 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
         color = FLOW_COLOR_BY_TYPE.get(flow.flow_type, FLOW_COLOR_BY_TYPE["component"])
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
+        flow_tooltip = (
+            f"<b>{source.name} → {target.name}</b><br/>"
+            f"Component: {flow.component.name if flow.component else 'Generic'}<br/>"
+            f"Flow type: {flow.flow_type}<br/>"
+            f"Lead time: {flow.lead_time_days or 'n/a'} d"
+        )
+
         if distance_km > 0.5:
             tip_lat, tip_lon = target.latitude, target.longitude
 
@@ -979,6 +997,7 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                     ],
                     "color": color,
                     "line_color": [0, 0, 0, 210],
+                    "tooltip_html": flow_tooltip,
                 }
             )
         mid_lat, mid_lon = intermediate_point(
@@ -1009,12 +1028,7 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                 "icon_name": "arrow",
                 "bearing": bearing,
                 "angle": (bearing - 90.0) % 360.0,
-                "tooltip_html": (
-                    f"<b>{source.name} → {target.name}</b><br/>"
-                    f"Component: {flow.component.name if flow.component else 'Generic'}<br/>"
-                    f"Flow type: {flow.flow_type}<br/>"
-                    f"Lead time: {flow.lead_time_days or 'n/a'} d"
-                ),
+                "tooltip_html": flow_tooltip,
             }
         )
 
@@ -1168,6 +1182,10 @@ def render_map(map_data: MapData) -> None:
         layers=layers,
         initial_view_state=compute_view_state(map_data.nodes_df),
         map_style=MAP_STYLE_URL,
+        tooltip={
+            "html": "{tooltip_html}",
+            "style": {"backgroundColor": "#1f2630", "color": "white", "fontSize": "12px"},
+        },
     )
     st.pydeck_chart(deck, use_container_width=True)
     render_legend()
