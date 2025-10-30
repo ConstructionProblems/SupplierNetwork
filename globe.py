@@ -597,65 +597,95 @@ SAMPLE_FLOWS = [
 # ------------------------------------------------------------------------------
 
 def ensure_sample_data(session: Session) -> None:
-    existing = session.execute(select(Product).where(Product.name == SAMPLE_PRODUCT["name"])).scalar_one_or_none()
-    if existing:
-        return
-
-    product = Product(
-        name=SAMPLE_PRODUCT["name"],
-        client_code=SAMPLE_PRODUCT["client_code"],
-        description=SAMPLE_PRODUCT["description"],
-        lifecycle_status=SAMPLE_PRODUCT["lifecycle_status"],
-    )
-    session.add(product)
-    session.flush()
+    product = session.execute(select(Product).where(Product.name == SAMPLE_PRODUCT["name"])).scalar_one_or_none()
+    if product is None:
+        product = Product(
+            name=SAMPLE_PRODUCT["name"],
+            client_code=SAMPLE_PRODUCT["client_code"],
+            description=SAMPLE_PRODUCT["description"],
+            lifecycle_status=SAMPLE_PRODUCT["lifecycle_status"],
+        )
+        session.add(product)
+        session.flush()
+    else:
+        product.client_code = SAMPLE_PRODUCT["client_code"]
+        product.description = SAMPLE_PRODUCT["description"]
+        product.lifecycle_status = SAMPLE_PRODUCT["lifecycle_status"]
 
     components: Dict[str, Component] = {}
     for entry in SAMPLE_COMPONENTS:
-        component = Component(
-            product_id=product.id,
-            name=entry["name"],
-            qty_per_product=entry["qty"],
-            uom=entry["uom"],
-        )
-        session.add(component)
+        component = session.execute(
+            select(Component).where(Component.product_id == product.id, Component.name == entry["name"])
+        ).scalar_one_or_none()
+        if component is None:
+            component = Component(
+                product_id=product.id,
+                name=entry["name"],
+                qty_per_product=entry["qty"],
+                uom=entry["uom"],
+            )
+            session.add(component)
+        else:
+            component.qty_per_product = entry["qty"]
+            component.uom = entry["uom"]
         components[component.name] = component
     session.flush()
 
     facilities: Dict[str, Facility] = {}
     for entry in SAMPLE_FACILITIES:
-        facility = Facility(
-            name=entry["name"],
-            facility_type=entry["type"],
-            address=entry["address"],
-            city=entry["city"],
-            country=entry["country"],
-            latitude=entry["latitude"],
-            longitude=entry["longitude"],
-        )
+        facility = session.execute(select(Facility).where(Facility.name == entry["name"])).scalar_one_or_none()
+        if facility is None:
+            facility = Facility(
+                name=entry["name"],
+                facility_type=entry["type"],
+                address=entry["address"],
+                city=entry["city"],
+                country=entry["country"],
+                latitude=entry["latitude"],
+                longitude=entry["longitude"],
+            )
+            session.add(facility)
+            session.flush()
+        else:
+            facility.facility_type = entry["type"]
+            facility.address = entry["address"]
+            facility.city = entry["city"]
+            facility.country = entry["country"]
+            facility.latitude = entry["latitude"]
+            facility.longitude = entry["longitude"]
         facility.set_operations(entry.get("operations", []))
-        session.add(facility)
-        session.flush()
         ensure_supply_node_for_facility(session, facility)
         facilities[facility.name] = facility
     session.flush()
 
     suppliers: Dict[str, Supplier] = {}
     for entry in [*SAMPLE_SUPPLIERS_TIER1, *SAMPLE_SUPPLIERS_TIER2, *SAMPLE_SUPPLIERS_TIER3]:
-        supplier = Supplier(
-            name=entry["name"],
-            tier=entry["tier"],
-            address=entry.get("address", ""),
-            city=entry["city"],
-            country=entry["country"],
-            latitude=entry["latitude"],
-            longitude=entry["longitude"],
-            primary_contact=entry.get("primary_contact", ""),
-            email=entry.get("email", ""),
-            phone=entry.get("phone", ""),
-        )
-        session.add(supplier)
-        session.flush()
+        supplier = session.execute(select(Supplier).where(Supplier.name == entry["name"])).scalar_one_or_none()
+        if supplier is None:
+            supplier = Supplier(
+                name=entry["name"],
+                tier=entry["tier"],
+                address=entry.get("address", ""),
+                city=entry["city"],
+                country=entry["country"],
+                latitude=entry["latitude"],
+                longitude=entry["longitude"],
+                primary_contact=entry.get("primary_contact", ""),
+                email=entry.get("email", ""),
+                phone=entry.get("phone", ""),
+            )
+            session.add(supplier)
+            session.flush()
+        else:
+            supplier.tier = entry["tier"]
+            supplier.address = entry.get("address", "")
+            supplier.city = entry["city"]
+            supplier.country = entry["country"]
+            supplier.latitude = entry["latitude"]
+            supplier.longitude = entry["longitude"]
+            supplier.primary_contact = entry.get("primary_contact", "")
+            supplier.email = entry.get("email", "")
+            supplier.phone = entry.get("phone", "")
         ensure_supply_node_for_supplier(session, supplier)
         suppliers[supplier.name] = supplier
     session.flush()
@@ -666,14 +696,18 @@ def ensure_sample_data(session: Session) -> None:
             component = components.get(component_info["name"])
             if component is None:
                 continue
-            link = SupplierComponent(
-                supplier_id=supplier.id,
-                component_id=component.id,
-                capacity_units_per_month=component_info.get("capacity"),
-                moq=component_info.get("moq"),
-                lead_time_days=component_info.get("lead_time"),
-            )
-            session.add(link)
+            link = session.execute(
+                select(SupplierComponent).where(
+                    SupplierComponent.supplier_id == supplier.id,
+                    SupplierComponent.component_id == component.id,
+                )
+            ).scalar_one_or_none()
+            if link is None:
+                link = SupplierComponent(supplier_id=supplier.id, component_id=component.id)
+                session.add(link)
+            link.capacity_units_per_month = component_info.get("capacity")
+            link.moq = component_info.get("moq")
+            link.lead_time_days = component_info.get("lead_time")
     session.flush()
 
     for entry in SAMPLE_FACILITY_COMPONENTS:
@@ -681,12 +715,16 @@ def ensure_sample_data(session: Session) -> None:
         component = components.get(entry["component"])
         if facility is None or component is None:
             continue
-        link = FacilityComponent(
-            facility_id=facility.id,
-            component_id=component.id,
-            operation=entry.get("operation", ""),
-        )
-        session.add(link)
+        link = session.execute(
+            select(FacilityComponent).where(
+                FacilityComponent.facility_id == facility.id,
+                FacilityComponent.component_id == component.id,
+            )
+        ).scalar_one_or_none()
+        if link is None:
+            link = FacilityComponent(facility_id=facility.id, component_id=component.id)
+            session.add(link)
+        link.operation = entry.get("operation", "")
     session.flush()
 
     nodes_by_name: Dict[str, SupplyNode] = {}
@@ -699,6 +737,19 @@ def ensure_sample_data(session: Session) -> None:
         if source is None or target is None:
             continue
         component = components.get(entry.get("component", ""))
+        existing_flow = session.execute(
+            select(MaterialFlow).where(
+                MaterialFlow.from_node_id == source.id,
+                MaterialFlow.to_node_id == target.id,
+                MaterialFlow.component_id == (component.id if component else None),
+                MaterialFlow.flow_type == entry.get("flow_type", "component"),
+            )
+        ).scalar_one_or_none()
+        if existing_flow:
+            existing_flow.lead_time_days = entry.get("lead_time")
+            existing_flow.incoterms = entry.get("incoterms", "")
+            existing_flow.notes = entry.get("notes", "")
+            continue
         flow = MaterialFlow(
             from_node_id=source.id,
             to_node_id=target.id,
