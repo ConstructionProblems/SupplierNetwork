@@ -780,6 +780,32 @@ def calculate_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     return (bearing + 360.0) % 360.0
 
 
+def intermediate_point(lat1: float, lon1: float, lat2: float, lon2: float, fraction: float = 0.5) -> Tuple[float, float]:
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    lambda1 = math.radians(lon1)
+    lambda2 = math.radians(lon2)
+
+    delta = 2 * math.asin(
+        math.sqrt(
+            math.sin((phi2 - phi1) / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin((lambda2 - lambda1) / 2) ** 2
+        )
+    )
+    if math.isclose(delta, 0.0):
+        return lat1, lon1
+
+    a = math.sin((1 - fraction) * delta) / math.sin(delta)
+    b = math.sin(fraction * delta) / math.sin(delta)
+
+    x = a * math.cos(phi1) * math.cos(lambda1) + b * math.cos(phi2) * math.cos(lambda2)
+    y = a * math.cos(phi1) * math.sin(lambda1) + b * math.cos(phi2) * math.sin(lambda2)
+    z = a * math.sin(phi1) + b * math.sin(phi2)
+
+    phi_mid = math.atan2(z, math.sqrt(x * x + y * y))
+    lambda_mid = math.atan2(y, x)
+    return math.degrees(phi_mid), math.degrees(lambda_mid)
+
+
 def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
     all_nodes = session.execute(select(SupplyNode).order_by(SupplyNode.name)).scalars().all()
     nodes_by_id = {node.id: node for node in all_nodes}
@@ -902,6 +928,7 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
             continue
         color = FLOW_COLOR_BY_TYPE.get(flow.flow_type, FLOW_COLOR_BY_TYPE["component"])
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
+        mid_lat, mid_lon = intermediate_point(source.latitude, source.longitude, target.latitude, target.longitude, fraction=0.5)
         flow_records.append(
             {
                 "id": flow.id,
@@ -917,6 +944,8 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                 "target_lon": target.longitude,
                 "target_lat": target.latitude,
                 "color": color,
+                "mid_lon": mid_lon,
+                "mid_lat": mid_lat,
                 "icon_data": {
                     "url": ARROW_ICON_URL,
                     "width": 128,
@@ -925,6 +954,7 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                     "anchorX": 64,
                 },
                 "bearing": bearing,
+                "angle": (bearing - 90.0) % 360.0,
             }
         )
 
@@ -997,8 +1027,8 @@ def render_map(map_data: MapData) -> None:
         get_icon="icon_data",
         get_size=28,
         size_units="pixels",
-        get_position=["target_lon", "target_lat"],
-        get_angle="bearing",
+        get_position=["mid_lon", "mid_lat"],
+        get_angle="angle",
         pickable=False,
     )
 
