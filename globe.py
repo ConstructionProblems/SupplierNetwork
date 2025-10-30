@@ -1046,6 +1046,7 @@ def collect_visual_data(
         relevant_node_ids.add(target.id)
 
     node_records: List[Dict[str, object]] = []
+    node_component_map: Dict[str, List[str]] = {}
     missing_coordinates: List[str] = []
     for node in all_nodes:
         if node.id not in relevant_node_ids:
@@ -1108,6 +1109,7 @@ def collect_visual_data(
                 ),
             }
         )
+        node_component_map[node.id] = components_list
 
     flow_records: List[Dict[str, object]] = []
     for flow in filtered_flows:
@@ -1134,12 +1136,26 @@ def collect_visual_data(
             flow_color = [min(255, int(c * brightness)) for c in base_color[:3]] + [base_color[3]]
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
+        source_components = node_component_map.get(source.id, [])
+        component_name = flow.component.name if flow.component else None
         flow_tooltip = (
             f"<b>{source.name} → {target.name}</b><br/>"
             f"Component: {flow.component.name if flow.component else 'Generic'}<br/>"
             f"Flow type: {flow.flow_type}<br/>"
             f"Lead time: {flow.lead_time_days or 'n/a'} d"
         )
+        inputs_html = ""
+        if component_name is None and source_components:
+            inputs_html = "<br/><b>Inputs:</b><br/>" + "".join(
+                f"&nbsp;&nbsp;• {name}<br/>" for name in source_components
+            )
+        elif component_name is not None:
+            additional_inputs = [name for name in source_components if name != component_name]
+            if additional_inputs:
+                inputs_html = "<br/><b>Inputs:</b><br/>" + "".join(
+                    f"&nbsp;&nbsp;• {name}<br/>" for name in additional_inputs
+                )
+        flow_tooltip += inputs_html
 
         if distance_km > 0.5:
             tip_lat, tip_lon = target.latitude, target.longitude
@@ -1325,7 +1341,7 @@ def render_map(map_data: MapData, *, chart_placeholder=None) -> None:
         get_width="width",
         pickable=True,
         tooltip={
-            "html": "<b>{from_name} → {to_name}</b><br/><b>Component:</b> {component}<br/><b>Flow:</b> {flow_type}<br/><b>Lead time:</b> {lead_time} d<br/><b>Incoterms:</b> {incoterms}",
+            "html": "{tooltip_html}",
             "style": {"backgroundColor": "#1f2630", "color": "white"},
         },
     )
