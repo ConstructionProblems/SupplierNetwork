@@ -669,6 +669,8 @@ FLOW_COLOR_BY_TYPE: Dict[str, List[int]] = {
 
 NODE_RADIUS_BY_TIER = {1: 65000, 2: 55000, 3: 45000}
 FACILITY_RADIUS = 70000
+MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+ARROW_ICON_URL = "https://raw.githubusercontent.com/visgl/deck.gl-data/master/icon/arrow.png"
 
 
 @dataclass
@@ -766,6 +768,16 @@ def summarize_lead_times(node: SupplyNode, flows: Sequence[MaterialFlow]) -> str
     if math.isclose(minimum, maximum):
         return f"{minimum:.0f} d"
     return f"{minimum:.0f}–{maximum:.0f} d"
+
+
+def calculate_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    d_lambda = math.radians(lon2 - lon1)
+    y = math.sin(d_lambda) * math.cos(phi2)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(d_lambda)
+    bearing = math.degrees(math.atan2(y, x))
+    return (bearing + 360.0) % 360.0
 
 
 def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
@@ -889,6 +901,7 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
         if target.latitude is None or target.longitude is None:
             continue
         color = FLOW_COLOR_BY_TYPE.get(flow.flow_type, FLOW_COLOR_BY_TYPE["component"])
+        bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         flow_records.append(
             {
                 "id": flow.id,
@@ -904,6 +917,14 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                 "target_lon": target.longitude,
                 "target_lat": target.latitude,
                 "color": color,
+                "icon_data": {
+                    "url": ARROW_ICON_URL,
+                    "width": 128,
+                    "height": 128,
+                    "anchorY": 128,
+                    "anchorX": 64,
+                },
+                "bearing": bearing,
             }
         )
 
@@ -970,10 +991,21 @@ def render_map(map_data: MapData) -> None:
         },
     )
 
+    arrow_layer = pdk.Layer(
+        "IconLayer",
+        data=map_data.flows_df,
+        get_icon="icon_data",
+        get_size=28,
+        size_units="pixels",
+        get_position=["target_lon", "target_lat"],
+        get_angle="bearing",
+        pickable=False,
+    )
+
     deck = pdk.Deck(
-        layers=[flow_layer, node_layer],
+        layers=[flow_layer, arrow_layer, node_layer],
         initial_view_state=compute_view_state(map_data.nodes_df),
-        map_style="mapbox://styles/mapbox/light-v10",
+        map_style=MAP_STYLE_URL,
     )
     st.pydeck_chart(deck)
 
