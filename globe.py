@@ -961,20 +961,25 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
         if distance_km > 0.5:
-            if target.node_type == "supplier":
-                target_radius_m = NODE_RADIUS_BY_TIER.get(target.tier or 0, 20000)
-            else:
-                target_radius_m = FACILITY_RADIUS
-            target_radius_km = target_radius_m / 1000.0
-            tip_offset_km = target_radius_km + 15.0
-            tip_lat, tip_lon = destination_point(target.latitude, target.longitude, bearing, tip_offset_km)
+            arrow_fraction = max(0.55, 1.0 - (160.0 / distance_km))
+            tip_lat, tip_lon = intermediate_point(
+                source.latitude,
+                source.longitude,
+                target.latitude,
+                target.longitude,
+                fraction=arrow_fraction,
+            )
+            base_lat, base_lon = intermediate_point(
+                source.latitude,
+                source.longitude,
+                target.latitude,
+                target.longitude,
+                fraction=max(arrow_fraction - 0.08, 0.45),
+            )
 
-            base_center_km = max(target_radius_km + 4.0, tip_offset_km - max(distance_km * 0.08, 12.0))
-            base_lat, base_lon = destination_point(target.latitude, target.longitude, bearing, base_center_km)
-
-            wing_span_km = max(min(distance_km * 0.1, 160.0), 18.0)
-            left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 150.0, wing_span_km)
-            right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 150.0, wing_span_km)
+            lateral_span_km = max(min(distance_km * 0.08, 110.0), 12.0)
+            left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 160.0, lateral_span_km)
+            right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 160.0, lateral_span_km)
             arrow_records.append(
                 {
                     "id": flow.id,
