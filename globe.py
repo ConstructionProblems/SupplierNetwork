@@ -952,22 +952,16 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
             target.longitude,
             fraction=arrow_fraction,
         )
-        arrow_length_km = max(min(distance_km * 0.18, 450.0), 24.0)
+        arrow_length_m = max(min(distance_km * 1000.0 * 0.12, 120000.0), 8000.0)
         arrow_records.append(
             {
                 "id": flow.id,
                 "mid_lon": arrow_lon,
                 "mid_lat": arrow_lat,
                 "angle": (bearing - 90.0) % 360.0,
-                "size_meters": arrow_length_km * 1000.0,
+                "size_meters": arrow_length_m,
                 "color": color,
-                "icon_data": {
-                    "url": ARROW_ICON_URL,
-                    "width": 128,
-                    "height": 128,
-                    "anchorY": 64,
-                    "anchorX": 32,
-                },
+                "icon_name": "arrow",
             }
         )
         mid_lat, mid_lon = intermediate_point(
@@ -1079,7 +1073,7 @@ def render_legend() -> None:
         <div class="legend-item"><span class="legend-swatch square" style="background:#009688;"></span>Component Flow</div>
         <div class="legend-item"><span class="legend-swatch square" style="background:#8e2dc5;"></span>Semi-finished Flow</div>
         <div class="legend-item"><span class="legend-swatch square" style="background:#388e3c;"></span>Finished Flow</div>
-        <div class="legend-item"><span class="legend-swatch square" style="background:#ffffff; border:1px solid #94a3b8;"></span>Arrowhead shows flow direction</div>
+        <div class="legend-item"><span class="legend-swatch square" style="background:linear-gradient(90deg,#009688,#8e2dc5,#388e3c);"></span>Arrowhead (matches flow color & direction)</div>
       </div>
     </div>
     """
@@ -1128,13 +1122,18 @@ def render_map(map_data: MapData) -> None:
         arrow_layer = pdk.Layer(
             "IconLayer",
             data=map_data.arrow_df,
-            get_icon="icon_data",
+            get_icon="icon_name",
             get_position=["mid_lon", "mid_lat"],
             get_angle="angle",
             get_size="size_meters",
             size_units="meters",
+            size_scale=1,
             get_color="color",
             pickable=False,
+            icon_atlas=ARROW_ICON_URL,
+            icon_mapping={
+                "arrow": {"x": 0, "y": 0, "width": 128, "height": 128, "anchorY": 96, "anchorX": 32}
+            },
         )
         layers.append(arrow_layer)
     layers.append(node_layer)
