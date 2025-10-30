@@ -1120,6 +1120,16 @@ def render_map(map_data: MapData) -> None:
         radius_max_pixels=60,
         stroked=True,
         get_line_color=[0, 0, 0, 80],
+        tooltip={
+            "html": (
+                "<b>{name}</b><br/>"
+                "{role}<br/>"
+                "{city}<br/>"
+                "<b>Components:</b> {components}<br/>"
+                "<b>Lead times:</b> {lead_time_summary}"
+            ),
+            "style": {"backgroundColor": "#1f2630", "color": "white"},
+        },
     )
 
     flow_layer = pdk.Layer(
@@ -1146,7 +1156,11 @@ def render_map(map_data: MapData) -> None:
             get_fill_color="color",
             get_line_color="line_color",
             line_width_min_pixels=1,
-            pickable=False,
+            pickable=True,
+            tooltip={
+                "html": "{tooltip_html}",
+                "style": {"backgroundColor": "#1f2630", "color": "white"},
+            },
         )
         layers.append(arrow_layer)
 
