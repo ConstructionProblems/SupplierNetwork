@@ -688,6 +688,7 @@ class FilterCriteria:
 class MapData:
     nodes_df: pd.DataFrame
     flows_df: pd.DataFrame
+    arrow_df: pd.DataFrame
     nodes_by_id: Dict[str, SupplyNode]
     flows: List[MaterialFlow]
     missing_coordinates: List[str]
@@ -806,6 +807,35 @@ def intermediate_point(lat1: float, lon1: float, lat2: float, lon2: float, fract
     return math.degrees(phi_mid), math.degrees(lambda_mid)
 
 
+def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius = 6371.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    d_phi = phi2 - phi1
+    d_lambda = math.radians(lon2 - lon1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return radius * c
+
+
+def destination_point(lat: float, lon: float, bearing: float, distance_km: float) -> Tuple[float, float]:
+    radius = 6371.0
+    delta = distance_km / radius
+    theta = math.radians(bearing)
+
+    phi1 = math.radians(lat)
+    lambda1 = math.radians(lon)
+
+    sin_phi2 = math.sin(phi1) * math.cos(delta) + math.cos(phi1) * math.sin(delta) * math.cos(theta)
+    phi2 = math.asin(sin_phi2)
+
+    y = math.sin(theta) * math.sin(delta) * math.cos(phi1)
+    x = math.cos(delta) - math.sin(phi1) * sin_phi2
+    lambda2 = lambda1 + math.atan2(y, x)
+
+    return math.degrees(phi2), math.degrees(lambda2)
+
+
 def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
     all_nodes = session.execute(select(SupplyNode).order_by(SupplyNode.name)).scalars().all()
     nodes_by_id = {node.id: node for node in all_nodes}
@@ -836,6 +866,7 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
     flows = session.execute(flows_stmt).scalars().all()
 
     filtered_flows: List[MaterialFlow] = []
+    arrow_records: List[Dict[str, object]] = []
     for flow in flows:
         source = nodes_by_id.get(flow.from_node_id)
         target = nodes_by_id.get(flow.to_node_id)
@@ -929,6 +960,26 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
         color = FLOW_COLOR_BY_TYPE.get(flow.flow_type, FLOW_COLOR_BY_TYPE["component"])
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         mid_lat, mid_lon = intermediate_point(source.latitude, source.longitude, target.latitude, target.longitude, fraction=0.5)
+        distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
+        if distance_km > 0.1:
+            base_fraction = max(0.55, 1.0 - (120.0 / max(distance_km, 1.0)))
+            base_lat, base_lon = intermediate_point(source.latitude, source.longitude, target.latitude, target.longitude, fraction=base_fraction)
+            arrow_length = max(min(distance_km * 0.2, 600.0), 40.0)
+            wing_length = arrow_length * 0.35
+            left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 140.0, wing_length)
+            right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 140.0, wing_length)
+            arrow_records.append(
+                {
+                    "id": flow.id,
+                    "polygon": [
+                        [target.longitude, target.latitude],
+                        [left_lon, left_lat],
+                        [right_lon, right_lat],
+                    ],
+                    "color": color,
+                }
+            )
+
         flow_records.append(
             {
                 "id": flow.id,
@@ -954,7 +1005,15 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
 
     nodes_df = pd.DataFrame(node_records)
     flows_df = pd.DataFrame(flow_records)
-    return MapData(nodes_df=nodes_df, flows_df=flows_df, nodes_by_id=nodes_by_id, flows=filtered_flows, missing_coordinates=missing_coordinates)
+    arrow_df = pd.DataFrame(arrow_records)
+    return MapData(
+        nodes_df=nodes_df,
+        flows_df=flows_df,
+        arrow_df=arrow_df,
+        nodes_by_id=nodes_by_id,
+        flows=filtered_flows,
+        missing_coordinates=missing_coordinates,
+    )
 
 
 def compute_view_state(nodes_df: pd.DataFrame) -> pdk.ViewState:
@@ -1015,23 +1074,23 @@ def render_map(map_data: MapData) -> None:
         },
     )
 
-    arrow_layer = pdk.Layer(
-        "IconLayer",
-        data=map_data.flows_df,
-        get_icon="icon_name",
-        get_size=36,
-        size_units="pixels",
-        get_position=["mid_lon", "mid_lat"],
-        get_angle="angle",
-        icon_atlas=ARROW_ICON_URL,
-        icon_mapping={
-            "arrow": {"x": 0, "y": 0, "width": 128, "height": 128, "anchorY": 128, "anchorX": 64}
-        },
-        pickable=False,
-    )
+    layers = [flow_layer]
+    if not map_data.arrow_df.empty:
+        arrow_layer = pdk.Layer(
+            "PolygonLayer",
+            data=map_data.arrow_df,
+            get_polygon="polygon",
+            get_fill_color="color",
+            get_line_color="color",
+            line_width_min_pixels=0,
+            opacity=0.85,
+            pickable=False,
+        )
+        layers.append(arrow_layer)
+    layers.append(node_layer)
 
     deck = pdk.Deck(
-        layers=[flow_layer, arrow_layer, node_layer],
+        layers=layers,
         initial_view_state=compute_view_state(map_data.nodes_df),
         map_style=MAP_STYLE_URL,
     )
