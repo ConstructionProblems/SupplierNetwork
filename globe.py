@@ -1109,6 +1109,7 @@ def render_map(map_data: MapData) -> None:
         get_fill_color="color",
         get_radius="radius",
         pickable=True,
+        auto_highlight=True,
         radius_min_pixels=6,
         radius_max_pixels=60,
         stroked=True,
@@ -1134,7 +1135,7 @@ def render_map(map_data: MapData) -> None:
         },
     )
 
-    layers = [flow_layer]
+    layers = [flow_layer, node_layer]
     if not map_data.arrow_df.empty:
         arrow_layer = pdk.Layer(
             "PolygonLayer",
@@ -1146,7 +1147,6 @@ def render_map(map_data: MapData) -> None:
             pickable=False,
         )
         layers.append(arrow_layer)
-    layers.append(node_layer)
 
     deck = pdk.Deck(
         layers=layers,
