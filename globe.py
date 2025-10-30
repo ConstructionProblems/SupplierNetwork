@@ -946,13 +946,7 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                 "color": color,
                 "mid_lon": mid_lon,
                 "mid_lat": mid_lat,
-                "icon_data": {
-                    "url": ARROW_ICON_URL,
-                    "width": 128,
-                    "height": 128,
-                    "anchorY": 128,
-                    "anchorX": 64,
-                },
+                "icon_name": "arrow",
                 "bearing": bearing,
                 "angle": (bearing - 90.0) % 360.0,
             }
@@ -1024,11 +1018,15 @@ def render_map(map_data: MapData) -> None:
     arrow_layer = pdk.Layer(
         "IconLayer",
         data=map_data.flows_df,
-        get_icon="icon_data",
-        get_size=28,
+        get_icon="icon_name",
+        get_size=36,
         size_units="pixels",
         get_position=["mid_lon", "mid_lat"],
         get_angle="angle",
+        icon_atlas=ARROW_ICON_URL,
+        icon_mapping={
+            "arrow": {"x": 0, "y": 0, "width": 128, "height": 128, "anchorY": 128, "anchorX": 64}
+        },
         pickable=False,
     )
 
@@ -1137,7 +1135,8 @@ def render_summary(session: Session, filters: FilterCriteria, map_data: MapData)
         component_stmt = component_stmt.where(Component.id.in_(filters.component_ids))
     elif filters.product_ids:
         component_stmt = component_stmt.where(Component.product_id.in_(filters.product_ids))
-    component_count = session.execute(component_stmt).scalars().unique().count()
+    component_results = session.execute(component_stmt).scalars().unique().all()
+    component_count = len(component_results)
 
     supplier_rows = map_data.nodes_df[map_data.nodes_df["role"].str.startswith("Supplier")]
     tier1_count = int((supplier_rows["tier"] == 1).sum()) if not supplier_rows.empty else 0
