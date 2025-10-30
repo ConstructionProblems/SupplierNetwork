@@ -1,0 +1,8 @@
+streamlit
+pydeck
+pandas
+sqlalchemy
+alembic
+fastapi
+uvicorn
+pydantic
