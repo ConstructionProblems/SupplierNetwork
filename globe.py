@@ -1418,6 +1418,13 @@ def render_map(map_data: MapData, *, chart_placeholder=None) -> None:
             "html": "{tooltip_html}",
             "style": {"backgroundColor": "#1f2630", "color": "white", "fontSize": "12px"},
         },
+        controller={
+            "dragRotate": True,
+            "touchRotate": True,
+            "scrollZoom": True,
+            "doubleClickZoom": True,
+            "touchZoom": True,
+        },
     )
     target = chart_placeholder if chart_placeholder is not None else st
     target.pydeck_chart(deck, use_container_width=True)
