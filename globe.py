@@ -667,8 +667,8 @@ FLOW_COLOR_BY_TYPE: Dict[str, List[int]] = {
     "finished": [56, 142, 60, 200],
 }
 
-NODE_RADIUS_BY_TIER = {1: 65000, 2: 55000, 3: 45000}
-FACILITY_RADIUS = 70000
+NODE_RADIUS_BY_TIER = {1: 32000, 2: 26000, 3: 20000}
+FACILITY_RADIUS = 35000
 MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
 ARROW_ICON_URL = "https://raw.githubusercontent.com/visgl/deck.gl-data/master/icon/arrow.png"
 
@@ -818,24 +818,6 @@ def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) ->
     return radius * c
 
 
-def destination_point(lat: float, lon: float, bearing: float, distance_km: float) -> Tuple[float, float]:
-    radius = 6371.0
-    delta = distance_km / radius
-    theta = math.radians(bearing)
-
-    phi1 = math.radians(lat)
-    lambda1 = math.radians(lon)
-
-    sin_phi2 = math.sin(phi1) * math.cos(delta) + math.cos(phi1) * math.sin(delta) * math.cos(theta)
-    phi2 = math.asin(sin_phi2)
-
-    y = math.sin(theta) * math.sin(delta) * math.cos(phi1)
-    x = math.cos(delta) - math.sin(phi1) * sin_phi2
-    lambda2 = lambda1 + math.atan2(y, x)
-
-    return math.degrees(phi2), math.degrees(lambda2)
-
-
 def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
     all_nodes = session.execute(select(SupplyNode).order_by(SupplyNode.name)).scalars().all()
     nodes_by_id = {node.id: node for node in all_nodes}
@@ -959,26 +941,42 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
             continue
         color = FLOW_COLOR_BY_TYPE.get(flow.flow_type, FLOW_COLOR_BY_TYPE["component"])
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
-        mid_lat, mid_lon = intermediate_point(source.latitude, source.longitude, target.latitude, target.longitude, fraction=0.5)
         distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
+        arrow_fraction = 0.5
         if distance_km > 0.1:
-            base_fraction = max(0.55, 1.0 - (120.0 / max(distance_km, 1.0)))
-            base_lat, base_lon = intermediate_point(source.latitude, source.longitude, target.latitude, target.longitude, fraction=base_fraction)
-            arrow_length = max(min(distance_km * 0.2, 600.0), 40.0)
-            wing_length = arrow_length * 0.35
-            left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 140.0, wing_length)
-            right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 140.0, wing_length)
-            arrow_records.append(
-                {
-                    "id": flow.id,
-                    "polygon": [
-                        [target.longitude, target.latitude],
-                        [left_lon, left_lat],
-                        [right_lon, right_lat],
-                    ],
-                    "color": color,
-                }
-            )
+            arrow_fraction = max(0.6, 1.0 - (180.0 / max(distance_km, 1.0)))
+        arrow_lat, arrow_lon = intermediate_point(
+            source.latitude,
+            source.longitude,
+            target.latitude,
+            target.longitude,
+            fraction=arrow_fraction,
+        )
+        arrow_length_km = max(min(distance_km * 0.18, 450.0), 24.0)
+        arrow_records.append(
+            {
+                "id": flow.id,
+                "mid_lon": arrow_lon,
+                "mid_lat": arrow_lat,
+                "angle": (bearing - 90.0) % 360.0,
+                "size_meters": arrow_length_km * 1000.0,
+                "color": color,
+                "icon_data": {
+                    "url": ARROW_ICON_URL,
+                    "width": 128,
+                    "height": 128,
+                    "anchorY": 64,
+                    "anchorX": 32,
+                },
+            }
+        )
+        mid_lat, mid_lon = intermediate_point(
+            source.latitude,
+            source.longitude,
+            target.latitude,
+            target.longitude,
+            fraction=0.5,
+        )
 
         flow_records.append(
             {
@@ -1037,6 +1035,57 @@ def compute_view_state(nodes_df: pd.DataFrame) -> pdk.ViewState:
     return pdk.ViewState(latitude=mean_lat, longitude=mean_lon, zoom=zoom, pitch=35)
 
 
+def render_legend() -> None:
+    legend_css = """
+    <style>
+    .legend-container {
+        background: rgba(15, 23, 42, 0.85);
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-top: 12px;
+        color: #f8fafc;
+        font-size: 0.86rem;
+    }
+    .legend-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 8px 16px;
+    }
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        line-height: 1.3;
+    }
+    .legend-swatch {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .legend-swatch.square {
+        border-radius: 4px;
+    }
+    </style>
+    """
+    legend_html = """
+    <div class="legend-container">
+      <div class="legend-grid">
+        <div class="legend-item"><span class="legend-swatch" style="background:#1f77b4;"></span>Supplier Tier-1</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#66c2ff;"></span>Supplier Tier-2</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#c6dbef;"></span>Supplier Tier-3</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#ff7f0e;"></span>Assembly Facility</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#fdd835;"></span>Sub-assembly Facility</div>
+        <div class="legend-item"><span class="legend-swatch square" style="background:#009688;"></span>Component Flow</div>
+        <div class="legend-item"><span class="legend-swatch square" style="background:#8e2dc5;"></span>Semi-finished Flow</div>
+        <div class="legend-item"><span class="legend-swatch square" style="background:#388e3c;"></span>Finished Flow</div>
+        <div class="legend-item"><span class="legend-swatch square" style="background:#ffffff; border:1px solid #94a3b8;"></span>Arrowhead shows flow direction</div>
+      </div>
+    </div>
+    """
+    st.markdown(legend_css + legend_html, unsafe_allow_html=True)
+
+
 def render_map(map_data: MapData) -> None:
     if map_data.nodes_df.empty:
         st.info("No network nodes match the current filters.")
@@ -1077,13 +1126,14 @@ def render_map(map_data: MapData) -> None:
     layers = [flow_layer]
     if not map_data.arrow_df.empty:
         arrow_layer = pdk.Layer(
-            "PolygonLayer",
+            "IconLayer",
             data=map_data.arrow_df,
-            get_polygon="polygon",
-            get_fill_color="color",
-            get_line_color="color",
-            line_width_min_pixels=0,
-            opacity=0.85,
+            get_icon="icon_data",
+            get_position=["mid_lon", "mid_lat"],
+            get_angle="angle",
+            get_size="size_meters",
+            size_units="meters",
+            get_color="color",
             pickable=False,
         )
         layers.append(arrow_layer)
@@ -1095,6 +1145,7 @@ def render_map(map_data: MapData) -> None:
         map_style=MAP_STYLE_URL,
     )
     st.pydeck_chart(deck)
+    render_legend()
 
 
 # ------------------------------------------------------------------------------
