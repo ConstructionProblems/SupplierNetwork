@@ -961,25 +961,14 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
         if distance_km > 0.5:
-            arrow_fraction = max(0.55, 1.0 - (160.0 / distance_km))
-            tip_lat, tip_lon = intermediate_point(
-                source.latitude,
-                source.longitude,
-                target.latitude,
-                target.longitude,
-                fraction=arrow_fraction,
-            )
-            base_lat, base_lon = intermediate_point(
-                source.latitude,
-                source.longitude,
-                target.latitude,
-                target.longitude,
-                fraction=max(arrow_fraction - 0.08, 0.45),
-            )
+            tip_lat, tip_lon = target.latitude, target.longitude
 
-            lateral_span_km = max(min(distance_km * 0.08, 110.0), 12.0)
-            left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 160.0, lateral_span_km)
-            right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 160.0, lateral_span_km)
+            base_offset_km = max(min(distance_km * 0.06, 35.0), 5.0)
+            base_lat, base_lon = destination_point(tip_lat, tip_lon, bearing + 180.0, base_offset_km)
+
+            lateral_span_km = max(min(base_offset_km * 0.6, 25.0), 3.5)
+            left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 145.0, lateral_span_km)
+            right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 145.0, lateral_span_km)
             arrow_records.append(
                 {
                     "id": flow.id,
