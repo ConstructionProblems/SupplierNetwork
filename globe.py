@@ -1475,6 +1475,23 @@ def render_summary(session: Session, filters: FilterCriteria, map_data: MapData)
     col2.metric("Suppliers (All Tiers)", total_supplier_count)
     col2.metric("Countries", country_count)
 
+    tier_counts = (
+        supplier_rows.dropna(subset=["tier"])
+        .groupby("tier")
+        .size()
+        .to_dict()
+        if not supplier_rows.empty
+        else {}
+    )
+    st.markdown("**Supplier Tier Breakdown**")
+    if tier_counts:
+        breakdown_lines = [
+            f"- Tier {int(tier)} suppliers: {count}" for tier, count in sorted(tier_counts.items())
+        ]
+        st.markdown("\n".join(breakdown_lines))
+    else:
+        st.write("No suppliers available for the current selection.")
+
     longest_days, path_flows = compute_longest_lead_path(map_data)
     if path_flows:
         nodes_sequence = [map_data.nodes_by_id[path_flows[0].from_node_id].name]
