@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import math
+import time
 import uuid
 import zipfile
 from collections import defaultdict
@@ -836,7 +837,13 @@ def destination_point(lat: float, lon: float, bearing: float, distance_km: float
     return math.degrees(phi2), math.degrees(lambda2)
 
 
-def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
+def collect_visual_data(
+    session: Session,
+    filters: FilterCriteria,
+    highlight_component_ids: Optional[Set[str]] | None = None,
+    animation_phase: float = 0.0,
+) -> MapData:
+    highlight_component_ids = highlight_component_ids or set()
     all_nodes = session.execute(select(SupplyNode).order_by(SupplyNode.name)).scalars().all()
     nodes_by_id = {node.id: node for node in all_nodes}
 
@@ -968,7 +975,19 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
             continue
         if target.latitude is None or target.longitude is None:
             continue
-        color = FLOW_COLOR_BY_TYPE.get(flow.flow_type, FLOW_COLOR_BY_TYPE["component"])
+        base_color = FLOW_COLOR_BY_TYPE.get(flow.flow_type, FLOW_COLOR_BY_TYPE["component"])
+        flow_index = len(flow_records)
+        component_id = flow.component_id
+        is_highlighted = bool(highlight_component_ids) and component_id in highlight_component_ids
+        pulse = 1.0
+        if is_highlighted:
+            pulse = 1.0 + 0.55 * math.sin(animation_phase + flow_index * 0.75)
+            pulse = max(0.5, pulse)
+        width = 4.0 * max(0.6, pulse)
+        flow_color = base_color
+        if is_highlighted:
+            brightness = min(1.6, 1.05 + 0.45 * math.sin(animation_phase + flow_index * 0.65))
+            flow_color = [min(255, int(c * brightness)) for c in base_color[:3]] + [base_color[3]]
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
         flow_tooltip = (
@@ -987,6 +1006,10 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
             lateral_span_km = max(min(base_offset_km * 0.6, 25.0), 3.5)
             left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 145.0, lateral_span_km)
             right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 145.0, lateral_span_km)
+            arrow_color = flow_color
+            if is_highlighted:
+                boost = min(1.7, 1.05 + 0.45 * math.sin(animation_phase + flow_index * 0.85))
+                arrow_color = [min(255, int(c * boost)) for c in flow_color[:3]] + [flow_color[3]]
             arrow_records.append(
                 {
                     "id": flow.id,
@@ -995,7 +1018,7 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                         [left_lon, left_lat],
                         [right_lon, right_lat],
                     ],
-                    "color": color,
+                    "color": arrow_color,
                     "line_color": [0, 0, 0, 210],
                     "tooltip_html": flow_tooltip,
                 }
@@ -1022,12 +1045,14 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                 "source_lat": source.latitude,
                 "target_lon": target.longitude,
                 "target_lat": target.latitude,
-                "color": color,
+                "color": flow_color,
                 "mid_lon": mid_lon,
                 "mid_lat": mid_lat,
                 "icon_name": "arrow",
                 "bearing": bearing,
                 "angle": (bearing - 90.0) % 360.0,
+                "width": width,
+                "highlighted": is_highlighted,
                 "tooltip_html": flow_tooltip,
             }
         )
@@ -1117,7 +1142,7 @@ def render_legend() -> None:
     st.markdown(legend_css + legend_html, unsafe_allow_html=True)
 
 
-def render_map(map_data: MapData) -> None:
+def render_map(map_data: MapData, *, chart_placeholder=None) -> None:
     if map_data.nodes_df.empty:
         st.info("No network nodes match the current filters.")
         return
@@ -1153,7 +1178,7 @@ def render_map(map_data: MapData) -> None:
         get_target_position=["target_lon", "target_lat"],
         get_source_color="color",
         get_target_color="color",
-        get_width=4,
+        get_width="width",
         pickable=True,
         tooltip={
             "html": "<b>{from_name} → {to_name}</b><br/><b>Component:</b> {component}<br/><b>Flow:</b> {flow_type}<br/><b>Lead time:</b> {lead_time} d<br/><b>Incoterms:</b> {incoterms}",
@@ -1187,8 +1212,8 @@ def render_map(map_data: MapData) -> None:
             "style": {"backgroundColor": "#1f2630", "color": "white", "fontSize": "12px"},
         },
     )
-    st.pydeck_chart(deck, use_container_width=True)
-    render_legend()
+    target = chart_placeholder if chart_placeholder is not None else st
+    target.pydeck_chart(deck, use_container_width=True)
 
 
 # ------------------------------------------------------------------------------
@@ -1240,7 +1265,7 @@ def compute_longest_lead_path(map_data: MapData) -> Tuple[float, List[MaterialFl
     return best_total, path
 
 
-def build_bom_coverage_table(session: Session, filters: FilterCriteria) -> pd.DataFrame:
+def build_bom_coverage_table(session: Session, filters: FilterCriteria) -> Tuple[pd.DataFrame, Dict[str, str]]:
     components_stmt = select(Component).order_by(Component.name)
     if filters.component_ids:
         components_stmt = components_stmt.where(Component.id.in_(filters.component_ids))
@@ -1249,6 +1274,7 @@ def build_bom_coverage_table(session: Session, filters: FilterCriteria) -> pd.Da
     components = session.execute(components_stmt).scalars().all()
 
     rows: List[Dict[str, object]] = []
+    id_by_name: Dict[str, str] = {}
     for component in components:
         suppliers = [link.supplier for link in component.supplier_links if link.supplier]
         tier1_suppliers = [supplier for supplier in suppliers if (supplier.tier or 0) == 1]
@@ -1263,6 +1289,7 @@ def build_bom_coverage_table(session: Session, filters: FilterCriteria) -> pd.Da
             status = "Dual-source"
         else:
             status = "Multi-source"
+        id_by_name[component.name] = component.id
         rows.append(
             {
                 "Component": component.name,
@@ -1271,12 +1298,14 @@ def build_bom_coverage_table(session: Session, filters: FilterCriteria) -> pd.Da
                 "Sourcing status": status,
                 "Tier-1 suppliers": tier1_names,
                 "All suppliers": supplier_names,
+                "Component ID": component.id,
             }
         )
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    return df, id_by_name
 
 
-def render_summary(session: Session, filters: FilterCriteria, map_data: MapData) -> None:
+def render_summary(session: Session, filters: FilterCriteria, map_data: MapData) -> Set[str]:
     st.subheader("Summary")
     product_line = ", ".join(filters.selected_product_names) if filters.selected_product_names else "All products"
     component_line = ", ".join(filters.selected_component_names) if filters.selected_component_names else "All components"
@@ -1311,11 +1340,28 @@ def render_summary(session: Session, filters: FilterCriteria, map_data: MapData)
         st.caption("No lead-time path available for the current selection.")
 
     st.markdown("**BOM Coverage**")
-    coverage_df = build_bom_coverage_table(session, filters)
+    coverage_df, component_mapping = build_bom_coverage_table(session, filters)
+    selected_component_ids: Set[str] = set()
     if coverage_df.empty:
         st.write("No components available for the current selection.")
     else:
-        st.dataframe(coverage_df, use_container_width=True, hide_index=True)
+        display_df = coverage_df.drop(columns=["Component ID"]).reset_index(drop=True)
+        st.data_editor(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            disabled=True,
+            key="bom_coverage_editor",
+        )
+        selection_state = st.session_state.get("bom_coverage_editor")
+        if isinstance(selection_state, dict):
+            selected_rows = selection_state.get("selection", {}).get("rows", []) or []
+            for idx in selected_rows:
+                if 0 <= idx < len(coverage_df):
+                    component_name = coverage_df.iloc[idx]["Component"]
+                    component_id = component_mapping.get(component_name)
+                    if component_id:
+                        selected_component_ids.add(component_id)
 
     st.markdown("**Node Detail**")
     node_options = ["—"] + map_data.nodes_df["name"].tolist()
@@ -1328,6 +1374,8 @@ def render_summary(session: Session, filters: FilterCriteria, map_data: MapData)
     selected_flow = st.selectbox("Inspect flow", flow_options, key="flow_detail_select")
     if selected_flow and selected_flow != "—":
         render_flow_detail(session, selected_flow, map_data)
+
+    return selected_component_ids
 
 
 def render_node_detail(session: Session, node_name: str, map_data: MapData) -> None:
@@ -2162,16 +2210,28 @@ def main() -> None:
 
     with SessionFactory() as session:
         filters = render_filters(session)
-        map_data = collect_visual_data(session, filters)
-        if map_data.missing_coordinates:
-            st.warning(f"Missing coordinates for: {', '.join(map_data.missing_coordinates)}")
+        stored_selection = set(st.session_state.get("selected_component_ids", []))
+        highlight_component_ids = set(filters.component_ids) | stored_selection
 
         map_col, summary_col = st.columns([3.0, 1.2])
         with map_col:
             st.subheader("Network Map")
-            render_map(map_data)
+            map_placeholder = st.empty()
+            if highlight_component_ids:
+                frames = 24
+                for frame in range(frames):
+                    phase = (frame / frames) * 2 * math.pi
+                    frame_data = collect_visual_data(session, filters, highlight_component_ids, phase)
+                    render_map(frame_data, chart_placeholder=map_placeholder)
+                    time.sleep(0.06)
+            map_data = collect_visual_data(session, filters, highlight_component_ids, animation_phase=0.0)
+            render_map(map_data, chart_placeholder=map_placeholder)
+            if map_data.missing_coordinates:
+                st.warning(f"Missing coordinates for: {', '.join(map_data.missing_coordinates)}")
+            render_legend()
         with summary_col:
-            render_summary(session, filters, map_data)
+            selected_from_table = render_summary(session, filters, map_data)
+        st.session_state["selected_component_ids"] = list(selected_from_table)
 
         st.divider()
         render_import_export(session)
