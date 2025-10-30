@@ -1009,6 +1009,12 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                 "icon_name": "arrow",
                 "bearing": bearing,
                 "angle": (bearing - 90.0) % 360.0,
+                "tooltip_html": (
+                    f"<b>{source.name} → {target.name}</b><br/>"
+                    f"Component: {flow.component.name if flow.component else 'Generic'}<br/>"
+                    f"Flow type: {flow.flow_type}<br/>"
+                    f"Lead time: {flow.lead_time_days or 'n/a'} d"
+                ),
             }
         )
 
@@ -1115,7 +1121,13 @@ def render_map(map_data: MapData) -> None:
         stroked=True,
         get_line_color=[0, 0, 0, 80],
         tooltip={
-            "html": "<b>{name}</b><br/>{role}<br/>{city}<br/><b>Components:</b> {components}<br/><b>Lead time:</b> {lead_time_summary}",
+            "html": (
+                "<b>{name}</b><br/>"
+                "{role}<br/>"
+                "{city}<br/>"
+                "<b>Components:</b> {components}<br/>"
+                "<b>Lead times:</b> {lead_time_summary}"
+            ),
             "style": {"backgroundColor": "#1f2630", "color": "white"},
         },
     )
@@ -1144,7 +1156,11 @@ def render_map(map_data: MapData) -> None:
             get_fill_color="color",
             get_line_color="line_color",
             line_width_min_pixels=1,
-            pickable=False,
+            pickable=True,
+            tooltip={
+                "html": "{tooltip_html}",
+                "style": {"backgroundColor": "#1f2630", "color": "white"},
+            },
         )
         layers.append(arrow_layer)
 
