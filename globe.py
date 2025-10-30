@@ -1111,6 +1111,8 @@ def collect_visual_data(
         )
         node_component_map[node.id] = components_list
 
+    outputs_by_node: Dict[str, Set[str]] = defaultdict(set)
+    inputs_by_node: Dict[str, Set[str]] = defaultdict(set)
     flow_records: List[Dict[str, object]] = []
     for flow in filtered_flows:
         source = nodes_by_id.get(flow.from_node_id)
@@ -1122,6 +1124,12 @@ def collect_visual_data(
         if target.latitude is None or target.longitude is None:
             continue
         base_color = FLOW_COLOR_BY_TYPE.get(flow.flow_type, FLOW_COLOR_BY_TYPE["component"])
+        component_name = flow.component.name if flow.component else None
+        if component_name:
+            outputs_by_node[source.id].add(component_name)
+            inputs_by_node[target.id].add(component_name)
+        else:
+            inputs_by_node[target.id].add(flow.flow_type.replace("_", " ").title())
         flow_index = len(flow_records)
         component_id = flow.component_id
         is_highlighted = bool(highlight_component_ids) and component_id in highlight_component_ids
@@ -1136,26 +1144,22 @@ def collect_visual_data(
             flow_color = [min(255, int(c * brightness)) for c in base_color[:3]] + [base_color[3]]
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
-        source_components = node_component_map.get(source.id, [])
-        component_name = flow.component.name if flow.component else None
         flow_tooltip = (
             f"<b>{source.name} → {target.name}</b><br/>"
             f"Component: {flow.component.name if flow.component else 'Generic'}<br/>"
             f"Flow type: {flow.flow_type}<br/>"
             f"Lead time: {flow.lead_time_days or 'n/a'} d"
         )
-        inputs_html = ""
-        if component_name is None and source_components:
-            inputs_html = "<br/><b>Inputs:</b><br/>" + "".join(
-                f"&nbsp;&nbsp;• {name}<br/>" for name in source_components
+        source_inputs = sorted(inputs_by_node.get(source.id, []))
+        if component_name is None and source_inputs:
+            flow_tooltip += "<br/><b>Inputs:</b><br/>" + "<br/>".join(
+                f"&nbsp;&nbsp;• {name}" for name in source_inputs
             )
         elif component_name is not None:
-            additional_inputs = [name for name in source_components if name != component_name]
-            if additional_inputs:
-                inputs_html = "<br/><b>Inputs:</b><br/>" + "".join(
-                    f"&nbsp;&nbsp;• {name}<br/>" for name in additional_inputs
+            if source_inputs:
+                flow_tooltip += "<br/><b>Inputs:</b><br/>" + "<br/>".join(
+                    f"&nbsp;&nbsp;• {name}" for name in source_inputs
                 )
-        flow_tooltip += inputs_html
 
         if distance_km > 0.5:
             tip_lat, tip_lon = target.latitude, target.longitude
@@ -1196,7 +1200,7 @@ def collect_visual_data(
                 "id": flow.id,
                 "from_name": source.name,
                 "to_name": target.name,
-                "component": flow.component.name if flow.component else "—",
+                "component": component_name or "—",
                 "flow_type": flow.flow_type,
                 "lead_time": float(flow.lead_time_days or 0.0),
                 "incoterms": flow.incoterms or "—",
@@ -1215,6 +1219,31 @@ def collect_visual_data(
                 "highlighted": is_highlighted,
                 "tooltip_html": flow_tooltip,
             }
+        )
+
+    for record in node_records:
+        node_id = record["id"]
+        outputs = node_component_map.get(node_id, [])
+        if not outputs:
+            outputs = sorted(outputs_by_node.get(node_id, []))
+            node_component_map[node_id] = outputs
+            record["components"] = ", ".join(outputs) if outputs else "—"
+        inputs_list = sorted(inputs_by_node.get(node_id, []))
+
+        def _format(items: Sequence[str]) -> str:
+            if not items:
+                return "—"
+            return "<br/>".join(f"&nbsp;&nbsp;• {item}" for item in items)
+
+        record["outputs_display"] = _format(outputs)
+        record["inputs_display"] = _format(inputs_list)
+        record["tooltip_html"] = (
+            f"<b>{record['name']}</b><br/>"
+            f"{record['role']}<br/>"
+            f"{record['city']}<br/>"
+            f"<b>Outputs:</b><br/>{record['outputs_display']}<br/>"
+            f"<b>Inputs:</b><br/>{record['inputs_display']}<br/>"
+            f"<b>Lead times:</b> {record['lead_time_summary']}"
         )
 
     nodes_df = pd.DataFrame(node_records)
@@ -1320,13 +1349,7 @@ def render_map(map_data: MapData, *, chart_placeholder=None) -> None:
         stroked=True,
         get_line_color=[0, 0, 0, 80],
         tooltip={
-            "html": (
-                "<b>{name}</b><br/>"
-                "{role}<br/>"
-                "{city}<br/>"
-                "<b>Components:</b> {components}<br/>"
-                "<b>Lead times:</b> {lead_time_summary}"
-            ),
+            "html": "{tooltip_html}",
             "style": {"backgroundColor": "#1f2630", "color": "white"},
         },
     )
