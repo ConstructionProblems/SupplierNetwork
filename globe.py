@@ -818,6 +818,24 @@ def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) ->
     return radius * c
 
 
+def destination_point(lat: float, lon: float, bearing: float, distance_km: float) -> Tuple[float, float]:
+    radius = 6371.0
+    delta = distance_km / radius
+    theta = math.radians(bearing)
+
+    phi1 = math.radians(lat)
+    lambda1 = math.radians(lon)
+
+    sin_phi2 = math.sin(phi1) * math.cos(delta) + math.cos(phi1) * math.sin(delta) * math.cos(theta)
+    phi2 = math.asin(sin_phi2)
+
+    y = math.sin(theta) * math.sin(delta) * math.cos(phi1)
+    x = math.cos(delta) - math.sin(phi1) * sin_phi2
+    lambda2 = lambda1 + math.atan2(y, x)
+
+    return math.degrees(phi2), math.degrees(lambda2)
+
+
 def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
     all_nodes = session.execute(select(SupplyNode).order_by(SupplyNode.name)).scalars().all()
     nodes_by_id = {node.id: node for node in all_nodes}
@@ -942,28 +960,36 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
         color = FLOW_COLOR_BY_TYPE.get(flow.flow_type, FLOW_COLOR_BY_TYPE["component"])
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
-        arrow_fraction = 0.5
-        if distance_km > 0.1:
-            arrow_fraction = max(0.6, 1.0 - (180.0 / max(distance_km, 1.0)))
-        arrow_lat, arrow_lon = intermediate_point(
-            source.latitude,
-            source.longitude,
-            target.latitude,
-            target.longitude,
-            fraction=arrow_fraction,
-        )
-        arrow_length_m = max(min(distance_km * 1000.0 * 0.12, 120000.0), 8000.0)
-        arrow_records.append(
-            {
-                "id": flow.id,
-                "mid_lon": arrow_lon,
-                "mid_lat": arrow_lat,
-                "angle": (bearing - 90.0) % 360.0,
-                "size_meters": arrow_length_m,
-                "color": color,
-                "icon_name": "arrow",
-            }
-        )
+        if distance_km > 0.5:
+            tip_fraction = max(0.6, 1.0 - (220.0 / distance_km))
+            tip_lat, tip_lon = intermediate_point(
+                source.latitude,
+                source.longitude,
+                target.latitude,
+                target.longitude,
+                fraction=min(tip_fraction + 0.05, 0.95),
+            )
+            base_lat, base_lon = intermediate_point(
+                source.latitude,
+                source.longitude,
+                target.latitude,
+                target.longitude,
+                fraction=tip_fraction,
+            )
+            spread_km = max(min(distance_km * 0.12, 220.0), 30.0)
+            left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 150.0, spread_km)
+            right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 150.0, spread_km)
+            arrow_records.append(
+                {
+                    "id": flow.id,
+                    "polygon": [
+                        [tip_lon, tip_lat],
+                        [left_lon, left_lat],
+                        [right_lon, right_lat],
+                    ],
+                    "color": color,
+                }
+            )
         mid_lat, mid_lon = intermediate_point(
             source.latitude,
             source.longitude,
