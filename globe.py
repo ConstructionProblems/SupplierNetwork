@@ -961,24 +961,20 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
         bearing = calculate_bearing(source.latitude, source.longitude, target.latitude, target.longitude)
         distance_km = haversine_distance_km(source.latitude, source.longitude, target.latitude, target.longitude)
         if distance_km > 0.5:
-            tip_fraction = max(0.6, 1.0 - (220.0 / distance_km))
-            tip_lat, tip_lon = intermediate_point(
-                source.latitude,
-                source.longitude,
-                target.latitude,
-                target.longitude,
-                fraction=min(tip_fraction + 0.05, 0.95),
-            )
-            base_lat, base_lon = intermediate_point(
-                source.latitude,
-                source.longitude,
-                target.latitude,
-                target.longitude,
-                fraction=tip_fraction,
-            )
-            spread_km = max(min(distance_km * 0.12, 220.0), 30.0)
-            left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 150.0, spread_km)
-            right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 150.0, spread_km)
+            if target.node_type == "supplier":
+                target_radius_m = NODE_RADIUS_BY_TIER.get(target.tier or 0, 20000)
+            else:
+                target_radius_m = FACILITY_RADIUS
+            target_radius_km = target_radius_m / 1000.0
+            tip_offset_km = target_radius_km + 15.0
+            tip_lat, tip_lon = destination_point(target.latitude, target.longitude, bearing, tip_offset_km)
+
+            base_center_km = max(target_radius_km + 4.0, tip_offset_km - max(distance_km * 0.08, 12.0))
+            base_lat, base_lon = destination_point(target.latitude, target.longitude, bearing, base_center_km)
+
+            wing_span_km = max(min(distance_km * 0.1, 160.0), 18.0)
+            left_lat, left_lon = destination_point(base_lat, base_lon, bearing + 150.0, wing_span_km)
+            right_lat, right_lon = destination_point(base_lat, base_lon, bearing - 150.0, wing_span_km)
             arrow_records.append(
                 {
                     "id": flow.id,
@@ -988,6 +984,7 @@ def collect_visual_data(session: Session, filters: FilterCriteria) -> MapData:
                         [right_lon, right_lat],
                     ],
                     "color": color,
+                    "line_color": [0, 0, 0, 210],
                 }
             )
         mid_lat, mid_lon = intermediate_point(
@@ -1146,20 +1143,13 @@ def render_map(map_data: MapData) -> None:
     layers = [flow_layer]
     if not map_data.arrow_df.empty:
         arrow_layer = pdk.Layer(
-            "IconLayer",
+            "PolygonLayer",
             data=map_data.arrow_df,
-            get_icon="icon_name",
-            get_position=["mid_lon", "mid_lat"],
-            get_angle="angle",
-            get_size="size_meters",
-            size_units="meters",
-            size_scale=1,
-            get_color="color",
+            get_polygon="polygon",
+            get_fill_color="color",
+            get_line_color="line_color",
+            line_width_min_pixels=1,
             pickable=False,
-            icon_atlas=ARROW_ICON_URL,
-            icon_mapping={
-                "arrow": {"x": 0, "y": 0, "width": 128, "height": 128, "anchorY": 96, "anchorX": 32}
-            },
         )
         layers.append(arrow_layer)
     layers.append(node_layer)
